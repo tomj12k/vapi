@@ -1,0 +1,191 @@
+# KNOWN_VULNS — ground-truth vulnerability catalog
+# Purpose: answer key for benchmarking Scantonomous scan findings against this app.
+# Diff scanner output vs. this file: a hit on a `vulnerable_source` path == true positive;
+# a hit on a `secure_source` path == false positive.
+#
+# Schema per entry:
+#   id               stable slug for this vuln class
+#   category         human-readable vulnerability class
+#   cwe              primary CWE id(s)
+#   owasp            OWASP API Security Top 10 (2023) category
+#   route            HTTP path to reach it (DAST)
+#   parameter        injectable/tainted input(s) (DAST)
+#   vulnerable_source source files that ARE vulnerable (SAST true-positive targets)
+#   secure_source    hardened variant that is NOT vulnerable (false-positive test)
+#   notes            context / caveats
+
+app: vAPI
+full_name: vAPI - Vulnerable Adversely Programmed Interface
+upstream: https://github.com/roottusk/vapi
+fork: https://github.com/tomj12k/vapi
+language: PHP
+scan_surface: [SAST-php, DAST-api]
+catalog_notes: >
+  Laravel 8 API. Routes are declared in vapi/routes/api.php (all under the /api prefix,
+  e.g. GET /api/api1/user/{id}). The exercises are numbered apiN to mirror the OWASP
+  API Security Top 10 2019 list; the owasp field below remaps each to its 2023 id
+  (2019 Excessive Data Exposure + Mass Assignment both collapse into API3:2023). No
+  hardened variants ship, so secure_source is empty. Injection/XSS entries carry the
+  legacy 2019 API8-Injection id because injection has no dedicated API 2023 category.
+  Controller paths are relative to repo root under vapi/app/Http/Controllers/.
+
+vulns:
+  - id: vapi-api1-bola
+    category: Broken Object Level Authorization
+    cwe: [CWE-639, CWE-285]
+    owasp: API1:2023-BOLA
+    route: GET /api/api1/user/{id}
+    parameter: [id, Authorization-Token]
+    vulnerable_source: [vapi/app/Http/Controllers/API1UsersController.php]
+    secure_source: []
+    notes: >
+      show() validates that the token belongs to *some* valid user, then returns
+      API1Users::find($id) with no ownership check (BOLA). update() also mass-assigns
+      via $user->update($request->all()).
+
+  - id: vapi-api2-broken-auth
+    category: Broken Authentication (credential stuffing / no rate limiting)
+    cwe: [CWE-287, CWE-307]
+    owasp: API2:2023-Broken Authentication
+    route: POST /api/api2/user/login
+    parameter: [email, password]
+    vulnerable_source: [vapi/app/Http/Controllers/API2UsersController.php]
+    secure_source: []
+    notes: >
+      login() does an unthrottled password compare (credential stuffing, see
+      Resources/API2_CredentialStuffing). show() returns all users for any valid token.
+
+  - id: vapi-api3-excessive-data-exposure
+    category: Excessive Data Exposure
+    cwe: [CWE-213, CWE-200]
+    owasp: API3:2023-Broken Object Property Level Authorization
+    route: GET /api/api3/comment
+    parameter: []
+    vulnerable_source: [vapi/app/Http/Controllers/API3CommentsController.php, vapi/app/Http/Controllers/API3UsersController.php]
+    secure_source: []
+    notes: >
+      show() returns API3Comments::all() including sensitive fields never rendered by
+      the client.
+
+  - id: vapi-api4-rate-limiting-otp
+    category: Lack of Resources & Rate Limiting (OTP brute force)
+    cwe: [CWE-770, CWE-307]
+    owasp: API4:2023-Unrestricted Resource Consumption
+    route: POST /api/api4/otp/verify
+    parameter: [otp]
+    vulnerable_source: [vapi/app/Http/Controllers/API4UsersController.php]
+    secure_source: []
+    notes: >
+      verify() checks a 4-digit numeric OTP with no attempt limit, allowing brute force
+      of the full 0000-9999 space.
+
+  - id: vapi-api5-bfla
+    category: Broken Function Level Authorization
+    cwe: [CWE-285, CWE-639]
+    owasp: API5:2023-Broken Function Level Authorization
+    route: GET /api/api5/users
+    parameter: [Authorization-Token]
+    vulnerable_source: [vapi/app/Http/Controllers/API5UsersController.php]
+    secure_source: []
+    notes: >
+      showall() lets any authenticated regular user list all users (an admin-level
+      function), while show() enforces per-id ownership.
+
+  - id: vapi-api6-mass-assignment
+    category: Mass Assignment
+    cwe: [CWE-915]
+    owasp: API3:2023-Broken Object Property Level Authorization
+    route: POST /api/api6/user
+    parameter: [credit]
+    vulnerable_source: [vapi/app/Http/Controllers/API6UsersController.php]
+    secure_source: []
+    notes: >
+      store() creates a user from raw JSON and only hides `credit` on output; a client
+      can mass-assign credit >= 100 to unlock the flag exposed by show().
+
+  - id: vapi-api7-security-misconfiguration-cors
+    category: Security Misconfiguration (reflected CORS with credentials)
+    cwe: [CWE-942, CWE-16]
+    owasp: API8:2023-Security Misconfiguration
+    route: GET /api/api7/user/key
+    parameter: [Origin]
+    vulnerable_source: [vapi/app/Http/Controllers/API7UsersController.php]
+    secure_source: []
+    notes: >
+      showkey() reflects the request Origin into Access-Control-Allow-Origin together
+      with Access-Control-Allow-Credentials: true, enabling cross-origin secret theft.
+
+  - id: vapi-api8-sql-injection
+    category: SQL Injection
+    cwe: [CWE-89]
+    owasp: API8:2019-Injection
+    route: POST /api/api8/user/login
+    parameter: [username, password]
+    vulnerable_source: [vapi/app/Http/Controllers/API8UsersController.php]
+    secure_source: []
+    notes: >
+      login() concatenates username/password directly into a whereRaw() clause.
+      Injection has no dedicated OWASP API 2023 category.
+
+  - id: vapi-api9-improper-inventory
+    category: Improper Assets / Inventory Management
+    cwe: [CWE-1059, CWE-16]
+    owasp: API9:2023-Improper Inventory Management
+    route: POST /api/api9/v1/user/login
+    parameter: [username, pin]
+    vulnerable_source: [vapi/app/Http/Controllers/API9UsersController.php, vapi/routes/api.php]
+    secure_source: []
+    notes: >
+      An old v1 login endpoint has no throttling while v2 is protected with
+      throttle:5,1 (routes/api.php); the deprecated version allows unlimited PIN
+      brute force.
+
+  - id: vapi-api10-insufficient-logging
+    category: Insufficient Logging & Monitoring
+    cwe: [CWE-778]
+    owasp: API10:2019-Insufficient Logging & Monitoring
+    route: GET /api/api10/user/flag
+    parameter: []
+    vulnerable_source: [vapi/app/Http/Controllers/API10UsersController.php]
+    secure_source: []
+    notes: >
+      Endpoint self-documents the lack of request logging/monitoring. This 2019
+      category was removed from the OWASP API 2023 Top 10 (no direct equivalent).
+
+  - id: vapi-jwt-weak-token
+    category: JWT Weak Secret + 'none' Algorithm Accepted
+    cwe: [CWE-347]
+    owasp: API2:2023-Broken Authentication
+    route: GET /api/jwt/user
+    parameter: [Authorization-Token]
+    vulnerable_source: [vapi/app/Http/Controllers/JustWeakTokenController.php]
+    secure_source: []
+    notes: >
+      Tokens are signed with the hardcoded key "YouNeverGonnaGetThisOne" and
+      JWT::decode allows the 'none' algorithm, so tokens can be forged (e.g. role=admin)
+      to obtain the flag.
+
+  - id: vapi-ssrf-serversurfer
+    category: Server-Side Request Forgery
+    cwe: [CWE-918]
+    owasp: API7:2023-SSRF
+    route: GET /api/serversurfer
+    parameter: [url]
+    vulnerable_source: [vapi/app/Http/Controllers/SurferController.php]
+    secure_source: []
+    notes: >
+      show() passes a user-supplied url to file_get_contents() behind only a weak
+      strpos() blocklist for 127.0.0.1/localhost, trivially bypassed for SSRF.
+
+  - id: vapi-stickynotes-xss-injection
+    category: Stored XSS / XML Injection
+    cwe: [CWE-79, CWE-91]
+    owasp: API8:2019-Injection
+    route: GET /api/stickynotes
+    parameter: [format, note]
+    vulnerable_source: [vapi/app/Http/Controllers/StickyNotesController.php]
+    secure_source: []
+    notes: >
+      store() persists unsanitized note content; show() reflects it into an XML/HTML
+      response with a caller-controlled Content-Type (text/{format}), enabling stored
+      XSS. Injection has no dedicated OWASP API 2023 category.
